@@ -98,6 +98,15 @@ static const char *netflix_stub_jstring(JNIEnv *env, jstring js)
     return env->GetStringUTFChars(js, NULL);
 }
 
+/* Argument decoding is opt-in: it is skipped by default so that a malformed or
+   unmodelled jdouble[]/Object[] layout cannot take the call down on entry. */
+static int netflix_stub_decode_enabled(void)
+{
+    const char *value = getenv("NETFLIX_STUB_DECODE");
+
+    return (value != NULL) && (value[0] != '\0') && (strcmp(value, "0") != 0);
+}
+
 static void netflix_stub_append(char *buf, size_t cap, const char *fmt, ...)
 {
     size_t len = strlen(buf);
@@ -114,9 +123,13 @@ static void netflix_stub_append(char *buf, size_t cap, const char *fmt, ...)
 jobject netflix_stub_call(JNIEnv *env, jstring ext_, jstring fn_, jint argc,
                           jdoubleArray dargs, jobjectArray oargs)
 {
+    fprintf(stderr, "[netflix-stub] enter\n");
+    fflush(stderr);
+
     if (env == NULL)
         return NULL;
 
+    const int decode = netflix_stub_decode_enabled();
     const char *ext = netflix_stub_jstring(env, ext_);
     const char *fn = netflix_stub_jstring(env, fn_);
     const char *ext_name = ext ? ext : "(null)";
@@ -141,11 +154,11 @@ jobject netflix_stub_call(JNIEnv *env, jstring ext_, jstring fn_, jint argc,
     /* Only the functions this fake JNI implements are used:
        GetArrayLength, GetDoubleArrayElements/ReleaseDoubleArrayElements,
        GetObjectArrayElement, GetStringUTFChars/ReleaseStringUTFChars,
-       NewStringUTF. No call is made on a NULL array, and decoding is skipped
-       when the array does not hold the expected element type. */
-    if (dargs != NULL) {
+       NewStringUTF. Decoding is gated behind NETFLIX_STUB_DECODE=1 and every
+       array/element is NULL-checked before it is touched. */
+    if (decode && dargs != NULL) {
         ArrayObject *darr = (ArrayObject *)dargs;
-        if (darr->element_size == sizeof(jdouble)) {
+        if (darr->element_size == sizeof(jdouble) && darr->elements != NULL) {
             jsize dcount = env->GetArrayLength(dargs);
             jdouble *delems = (dcount > 0) ? env->GetDoubleArrayElements(dargs, NULL) : NULL;
             if (dcount == 0) {
@@ -163,38 +176,50 @@ jobject netflix_stub_call(JNIEnv *env, jstring ext_, jstring fn_, jint argc,
                     netflix_stub_append(dbuf, sizeof(dbuf), ", ...");
                 env->ReleaseDoubleArrayElements(dargs, delems, JNI_ABORT);
             }
+        } else if (darr->elements == NULL) {
+            netflix_stub_append(dbuf, sizeof(dbuf), "<null elements>");
         } else {
             netflix_stub_append(dbuf, sizeof(dbuf), "<non-double-array>");
         }
     }
 
-    if (oargs != NULL) {
+    if (decode && oargs != NULL) {
         ArrayObject *sarr = (ArrayObject *)oargs;
-        jsize scount = env->GetArrayLength(oargs);
-        if (sarr->instance_clazz != &String::clazz) {
-            netflix_stub_append(sbuf, sizeof(sbuf), "<non-string-array %s>",
-                                sarr->instance_clazz ? sarr->instance_clazz->classname : "?");
+        if (sarr->elements == NULL) {
+            netflix_stub_append(sbuf, sizeof(sbuf), "<null elements>");
         } else {
-            for (jsize i = 0; i < scount && i < 16; i++) {
-                if (i)
-                    netflix_stub_append(sbuf, sizeof(sbuf), ", ");
+            jsize scount = env->GetArrayLength(oargs);
+            if (sarr->instance_clazz != &String::clazz) {
+                netflix_stub_append(sbuf, sizeof(sbuf), "<non-string-array %s>",
+                                    sarr->instance_clazz ? sarr->instance_clazz->classname : "?");
+            } else {
+                for (jsize i = 0; i < scount && i < 16; i++) {
+                    if (i)
+                        netflix_stub_append(sbuf, sizeof(sbuf), ", ");
 
-                jobject elem = env->GetObjectArrayElement(oargs, i);
-                const char *s = (elem != NULL) ? netflix_stub_jstring(env, (jstring)elem) : NULL;
-                if (s != NULL) {
-                    netflix_stub_append(sbuf, sizeof(sbuf), "\"%s\"", s);
-                    env->ReleaseStringUTFChars((jstring)elem, s);
-                } else {
-                    netflix_stub_append(sbuf, sizeof(sbuf), "null");
+                    jobject elem = env->GetObjectArrayElement(oargs, i);
+                    const char *s = (elem != NULL) ? netflix_stub_jstring(env, (jstring)elem) : NULL;
+                    if (s != NULL) {
+                        netflix_stub_append(sbuf, sizeof(sbuf), "\"%s\"", s);
+                        env->ReleaseStringUTFChars((jstring)elem, s);
+                    } else {
+                        netflix_stub_append(sbuf, sizeof(sbuf), "null");
+                    }
                 }
+                if (scount > 16)
+                    netflix_stub_append(sbuf, sizeof(sbuf), ", ...");
             }
-            if (scount > 16)
-                netflix_stub_append(sbuf, sizeof(sbuf), ", ...");
         }
     }
 
-    fprintf(stderr, "[netflix-stub] %s.%s argc=%d d=[%s] s=[%s] -> \"%s\"\n",
-            ext_name, fn_name, (int)argc, dbuf, sbuf, value);
+    if (decode) {
+        fprintf(stderr, "[netflix-stub] %s.%s argc=%d d=[%s] s=[%s] -> \"%s\"\n",
+                ext_name, fn_name, (int)argc, dbuf, sbuf, value);
+    } else {
+        fprintf(stderr, "[netflix-stub] %s.%s argc=%d -> \"%s\"\n",
+                ext_name, fn_name, (int)argc, value);
+    }
+    fflush(stderr);
 
     if (fn)
         env->ReleaseStringUTFChars(fn_, fn);

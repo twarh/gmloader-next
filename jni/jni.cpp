@@ -24,7 +24,9 @@ ABI_ATTR static jobjectArray iface_NewObjectArray(JNIEnv *env, jsize len, jclass
     Class *clazz = (Class*)clz;
     Object *first_elem = (Object*)init;
 
-    if (clazz->instance_size == 0)
+    /* FindClass() returns NULL for classes this fake JNI does not model
+       (e.g. java/lang/Object); callers may still hand that class here. */
+    if (clazz == NULL || clazz->instance_size == 0)
         return NULL;
 
     ArrayObject *arr = (ArrayObject*)calloc(1, sizeof(ArrayObject));
@@ -352,7 +354,7 @@ ABI_ATTR static jstring iface_NewString(JNIEnv *env, const jchar* unicodeChars, 
 ABI_ATTR static jsize iface_GetStringLength(JNIEnv *env, jstring jstr)
 {
     String *str = (String*)jstr;
-    return strlen(str->str);
+    return (str != NULL && str->str != NULL) ? strlen(str->str) : 0;
 }
 
 ABI_ATTR static const jchar* iface_GetStringChars(JNIEnv *env, jstring jstr, jboolean* isCopy)
@@ -361,7 +363,7 @@ ABI_ATTR static const jchar* iface_GetStringChars(JNIEnv *env, jstring jstr, jbo
     if (isCopy)
         *isCopy = JNI_TRUE;
    
-    if (str->str == NULL)
+    if (str == NULL || str->str == NULL)
         return NULL;
    
     return (jchar *)strdup(str->str);
@@ -374,14 +376,14 @@ ABI_ATTR static void iface_ReleaseStringChars(JNIEnv *env, jstring jstr, const j
 
 ABI_ATTR static jstring iface_NewStringUTF(JNIEnv *env, const char* bytes)
 {
-    String *str = new String(bytes);
+    String *str = new String(bytes ? bytes : "");
     return (jstring)str;
 }
 
 ABI_ATTR static jsize iface_GetStringUTFLength(JNIEnv *env, jstring jstr)
 {
     String *str = (String*)jstr;
-    return strlen(str->str);
+    return (str != NULL && str->str != NULL) ? strlen(str->str) : 0;
 }
 
 ABI_ATTR static const char* iface_GetStringUTFChars(JNIEnv *env, jstring jstr, jboolean* isCopy)
@@ -390,7 +392,10 @@ ABI_ATTR static const char* iface_GetStringUTFChars(JNIEnv *env, jstring jstr, j
     if (isCopy)
         *isCopy = JNI_TRUE;
 
-    return strdup(jstr ? str->str : "(nil)");
+    if (str == NULL || str->str == NULL)
+        return strdup("");
+
+    return strdup(str->str);
 }
 
 ABI_ATTR static void iface_ReleaseStringUTFChars(JNIEnv *env, jstring jstr, const char* utf)
@@ -401,12 +406,18 @@ ABI_ATTR static void iface_ReleaseStringUTFChars(JNIEnv *env, jstring jstr, cons
 ABI_ATTR static jsize iface_GetArrayLength(JNIEnv *env, jarray jarr)
 {
     ArrayObject* arr = (ArrayObject*)jarr;
+    if (arr == NULL)
+        return 0;
+
     return arr->count;
 }
 
 ABI_ATTR static jobject iface_GetObjectArrayElement(JNIEnv *env, jobjectArray jarr, jsize index)
 {
     ArrayObject* arr = (ArrayObject*)jarr;
+    if (arr == NULL || arr->elements == NULL || index < 0 || index >= arr->count)
+        return NULL;
+
     uintptr_t offs = (uintptr_t)arr->elements + (index * arr->element_size);
     return (jobject)(offs);
 }
@@ -834,8 +845,9 @@ ABI_ATTR static T * iface_GetArrayElements(JNIEnv *env, Tarr arr, jboolean *isCo
     if (isCopy)
         *isCopy = JNI_TRUE;
     
-    T *elements = (T*)malloc(array->count * array->element_size);
-    memcpy((void*)elements, array->elements, array->count * array->element_size);
+    T *elements = (T*)calloc(array->count ? array->count : 1, array->element_size ? array->element_size : 1);
+    if (elements != NULL && array->elements != NULL)
+        memcpy((void*)elements, array->elements, array->count * array->element_size);
     return elements;
 }
 
