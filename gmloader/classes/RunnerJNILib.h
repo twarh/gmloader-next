@@ -26,6 +26,9 @@ public:
     static void        (*GCMPushResult)(JNIEnv *env, jclass clz, String *_dataString, int _type, char _bSuccess);
     /* ... */
 
+    // Java extension dispatch (netflixAndroid stand-in)
+    static jobject CallExtensionFunction(JNIEnv *env, jclass clz, jstring ext, jstring fn, jint argc, jdoubleArray dargs, jobjectArray oargs);
+
     static jfloatArray GamepadAxesValues(JNIEnv *env, jclass clz, void *ins, jint deviceIndex, jstring test);
     static void MoveTaskToBack(JNIEnv *env, jclass clz);
     static int OsGetInfo(JNIEnv *env, jclass clz);

@@ -7,6 +7,7 @@
 #include "RunnerJNILib.h"
 #include "libyoyo.h"
 #include "jni/classes/bytebuffer.h"
+#include "netflix_stub.h"
 #include "video.h"
 
 #define MANGLED_CLASSPATH "Java_com_yoyogames_runner_RunnerJNILib_"
@@ -74,6 +75,11 @@ const FieldId RunnerJNILibFields[] = {
 jfloatArray RunnerJNILib::GamepadAxesValues(JNIEnv *env, jclass clz, void *ins, jint deviceIndex, jstring test)
 {
     return 0;
+}
+
+jobject RunnerJNILib::CallExtensionFunction(JNIEnv *env, jclass clz, jstring ext, jstring fn, jint argc, jdoubleArray dargs, jobjectArray oargs)
+{
+    return netflix_stub_call(env, ext, fn, argc, dargs, oargs);
 }
 
 extern int RunnerJNILib_MoveTaskToBackCalled;
@@ -198,6 +204,7 @@ jdouble RunnerJNILib::VideoIsLooping(JNIEnv *env, jclass clz)
 #endif // VIDEO_SUPPORT
 
 const ManagedMethod RunnerJNILibManagedMethods[] = {
+    REGISTER_STATIC_METHOD(RunnerJNILib, CallExtensionFunction, "(Ljava/lang/String;Ljava/lang/String;I[D[Ljava/lang/Object;)Ljava/lang/Object;"),
     REGISTER_STATIC_METHOD(RunnerJNILib, OsGetInfo, "()I"),
     REGISTER_STATIC_METHOD(RunnerJNILib, GamepadAxesValues, "(I)[F"),
     REGISTER_STATIC_METHOD(RunnerJNILib, MoveTaskToBack, "()V"),
